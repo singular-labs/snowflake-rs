@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -7,6 +8,7 @@ pub struct ExecRequest {
     pub async_exec: bool,
     pub sequence_id: u64,
     pub is_internal: bool,
+    pub parameters: Map<String, Value>,
 }
 
 #[derive(Serialize, Debug)]

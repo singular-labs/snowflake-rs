@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
 }
 
 async fn run_and_print(api: &SnowflakeApi, sql: &str) -> Result<()> {
-    let res = api.exec_raw(sql).await?;
+    let res = api.exec_raw(sql, serde_json::Map::new()).await?;
 
     let df = DataFrame::try_from(res)?;
     // alternatively, you can use the `try_into` method on the response

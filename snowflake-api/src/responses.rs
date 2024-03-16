@@ -7,6 +7,7 @@ use serde::Deserialize;
 #[serde(untagged)]
 pub enum ExecResponse {
     Query(QueryExecResponse),
+    AsyncQuery(QueryAsyncExecResponse),
     PutGet(PutGetExecResponse),
     Error(ExecErrorResponse),
 }
@@ -35,6 +36,7 @@ pub struct BaseRestResponse<D> {
 
 pub type PutGetExecResponse = BaseRestResponse<PutGetResponseData>;
 pub type QueryExecResponse = BaseRestResponse<QueryExecResponseData>;
+pub type QueryAsyncExecResponse = BaseRestResponse<QueryAsyncExecResponseData>;
 pub type ExecErrorResponse = BaseRestResponse<ExecErrorResponseData>;
 pub type AuthErrorResponse = BaseRestResponse<AuthErrorResponseData>;
 pub type AuthenticatorResponse = BaseRestResponse<AuthenticatorResponseData>;
@@ -161,6 +163,15 @@ pub struct QueryExecResponseData {
     pub result_ids: Option<String>,
     // `progressDesc`, and `queryAbortAfterSecs` are not used but exist in .NET
     // `sendResultTime`, `queryResultFormat`, `queryContext` also exist
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryAsyncExecResponseData {
+    pub query_id: String,
+    pub get_result_url: String,
+    pub query_aborts_after_secs: i64,
+    pub progress_desc: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
