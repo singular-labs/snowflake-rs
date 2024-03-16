@@ -15,6 +15,7 @@ clippy::missing_panics_doc
 
 use std::fmt::{Display, Formatter};
 use std::io;
+// use std::iter::Map;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -29,12 +30,13 @@ use object_store::local::LocalFileSystem;
 use object_store::ObjectStore;
 use regex::Regex;
 use reqwest_middleware::ClientWithMiddleware;
+use serde_json::{Map, Value};
 use thiserror::Error;
 
-use crate::connection::{Connection, ConnectionError};
 use responses::ExecResponse;
 use session::{AuthError, Session};
 
+use crate::connection::{Connection, ConnectionError};
 use crate::connection::QueryType;
 use crate::requests::ExecRequest;
 use crate::responses::{
@@ -367,7 +369,15 @@ impl SnowflakeApi {
     /// Execute a single query against API.
     /// If statement is PUT, then file will be uploaded to the Snowflake-managed storage
     pub async fn exec(&self, sql: &str) -> Result<QueryResult, SnowflakeApiError> {
-        let raw = self.exec_raw(sql).await?;
+        let raw = self.exec_raw(sql, Map::new()).await?;
+        let res = raw.deserialize_arrow()?;
+        Ok(res)
+    }
+
+    /// Similar to `exec` but accepts parameters that can be appended to the API request
+    /// Useful in cases where multiple statements are involved, and the `MULTI_STATEMENT_COUNT` parameter is required
+    pub async fn exec_params(&self, sql: &str, parameters: Map<String, Value>) -> Result<QueryResult, SnowflakeApiError> {
+        let raw = self.exec_raw(sql, parameters).await?;
         let res = raw.deserialize_arrow()?;
         Ok(res)
     }
@@ -375,22 +385,22 @@ impl SnowflakeApi {
     /// Executes a single query against API.
     /// If statement is PUT, then file will be uploaded to the Snowflake-managed storage
     /// Returns raw bytes in the Arrow response
-    pub async fn exec_raw(&self, sql: &str) -> Result<RawQueryResult, SnowflakeApiError> {
+    pub async fn exec_raw(&self, sql: &str, parameters: Map<String, Value>) -> Result<RawQueryResult, SnowflakeApiError> {
         let put_re = Regex::new(r"(?i)^(?:/\*.*\*/\s*)*put\s+").unwrap();
 
         // put commands go through a different flow and result is side-effect
         if put_re.is_match(sql) {
             log::info!("Detected PUT query");
 
-            self.exec_put(sql).await.map(|()| RawQueryResult::Empty)
+            self.exec_put(sql, parameters).await.map(|()| RawQueryResult::Empty)
         } else {
-            self.exec_arrow_raw(sql).await
+            self.exec_arrow_raw(sql, parameters).await
         }
     }
 
-    async fn exec_put(&self, sql: &str) -> Result<(), SnowflakeApiError> {
+    async fn exec_put(&self, sql: &str, parameters: Map<String, Value>,) -> Result<(), SnowflakeApiError> {
         let resp = self
-            .run_sql::<ExecResponse>(sql, QueryType::JsonQuery)
+            .run_sql::<ExecResponse>(sql, QueryType::JsonQuery, parameters)
             .await?;
         log::debug!("Got PUT response: {:?}", resp);
 
@@ -458,20 +468,20 @@ impl SnowflakeApi {
     /// Useful for debugging to get the straight query response
     #[cfg(debug_assertions)]
     pub async fn exec_response(&mut self, sql: &str) -> Result<ExecResponse, SnowflakeApiError> {
-        self.run_sql::<ExecResponse>(sql, QueryType::ArrowQuery)
+        self.run_sql::<ExecResponse>(sql, QueryType::ArrowQuery, Map::new())
             .await
     }
 
     /// Useful for debugging to get raw JSON response
     #[cfg(debug_assertions)]
     pub async fn exec_json(&mut self, sql: &str) -> Result<serde_json::Value, SnowflakeApiError> {
-        self.run_sql::<serde_json::Value>(sql, QueryType::JsonQuery)
+        self.run_sql::<serde_json::Value>(sql, QueryType::JsonQuery, Map::new())
             .await
     }
 
-    async fn exec_arrow_raw(&self, sql: &str) -> Result<RawQueryResult, SnowflakeApiError> {
+    async fn exec_arrow_raw(&self, sql: &str, parameters: Map<String, Value>) -> Result<RawQueryResult, SnowflakeApiError> {
         let resp = self
-            .run_sql::<ExecResponse>(sql, QueryType::ArrowQuery)
+            .run_sql::<ExecResponse>(sql, QueryType::ArrowQuery, parameters)
             .await?;
         log::debug!("Got query response: {:?}", resp);
 
@@ -525,6 +535,7 @@ impl SnowflakeApi {
         &self,
         sql_text: &str,
         query_type: QueryType,
+        parameters: Map<String, Value>,
     ) -> Result<R, SnowflakeApiError> {
         log::debug!("Executing: {}", sql_text);
 
@@ -535,6 +546,7 @@ impl SnowflakeApi {
             async_exec: false,
             sequence_id: parts.sequence_id,
             is_internal: false,
+            parameters,
         };
 
         let resp = self
