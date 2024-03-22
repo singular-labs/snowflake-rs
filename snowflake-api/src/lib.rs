@@ -48,7 +48,7 @@ pub mod connection;
 #[cfg(feature = "polars")]
 mod polars;
 mod requests;
-mod responses;
+pub mod responses;
 mod session;
 
 #[derive(Error, Debug)]
@@ -287,7 +287,7 @@ impl SnowflakeApiBuilder {
 /// Snowflake API, keeps connection pool and manages session for you
 pub struct SnowflakeApi {
     connection: Arc<Connection>,
-    session: Session,
+    pub session: Session,
     account_identifier: String,
 }
 
@@ -406,6 +406,7 @@ impl SnowflakeApi {
 
         match resp {
             ExecResponse::Query(_) => Err(SnowflakeApiError::UnexpectedResponse),
+            ExecResponse::AsyncQuery(_) => Err(SnowflakeApiError::UnexpectedResponse),
             ExecResponse::PutGet(pg) => self.put(pg).await,
             ExecResponse::Error(e) => Err(SnowflakeApiError::ApiError(
                 e.data.error_code,
@@ -488,6 +489,10 @@ impl SnowflakeApi {
         let resp = match resp {
             // processable response
             ExecResponse::Query(qr) => Ok(qr),
+            ExecResponse::AsyncQuery(aqr) => Err(SnowflakeApiError::ApiError(
+                aqr.code.unwrap_or_default(),
+                aqr.message.unwrap_or_default(),
+            )),
             ExecResponse::PutGet(_) => Err(SnowflakeApiError::UnexpectedResponse),
             ExecResponse::Error(e) => Err(SnowflakeApiError::ApiError(
                 e.data.error_code,
@@ -531,7 +536,7 @@ impl SnowflakeApi {
         }
     }
 
-    async fn run_sql<R: serde::de::DeserializeOwned>(
+    pub async fn run_sql<R: serde::de::DeserializeOwned>(
         &self,
         sql_text: &str,
         query_type: QueryType,
