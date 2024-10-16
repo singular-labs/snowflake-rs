@@ -19,6 +19,7 @@ default = ["cert-auth"]
 polars = ["dep:polars-core", "dep:polars-io"]
 
 [dependencies]
+anyhow = "1"
 arrow = "53"
 async-trait = "0.1"
 base64 = "0.22"

@@ -2,7 +2,9 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use reqwest_middleware::ClientWithMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use reqwest_retry::RetryTransientMiddleware;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use url::Url;
@@ -20,11 +22,29 @@ pub enum ConnectionError {
     UrlParsing(#[from] url::ParseError),
 
     #[error(transparent)]
-    Deserialization(#[from] serde_json::Error),
+    Deserialization(#[from] DeserializationError),
 
     #[error(transparent)]
     InvalidHeader(#[from] header::InvalidHeaderValue),
 }
+
+#[derive(Debug)]
+pub struct DeserializationError {
+    pub serde_error: serde_json::Error,
+    pub json_obj: serde_json::Value,
+}
+
+impl fmt::Display for DeserializationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Deserialization error: {}. JSON Object: {:#?}",
+            self.serde_error, self.json_obj
+        )
+    }
+}
+
+impl std::error::Error for DeserializationError {}
 
 /// Container for query parameters
 /// This API has different endpoints and MIME types for different requests
@@ -163,15 +183,24 @@ impl Connection {
         }
 
         // todo: persist client to use connection polling
-        let resp = self
+        // We first decode to Value, since since we're using an undocumented API
+        // and we sometimes get responses that doesn't match `R`
+        let resp: Value = self
             .client
             .post(url)
             .headers(headers)
             .json(&body)
             .send()
+            .await?
+            .json()
             .await?;
 
-        Ok(resp.json::<R>().await?)
+        Ok(
+            serde_json::from_value::<R>(resp.clone()).map_err(|e| DeserializationError {
+                serde_error: e,
+                json_obj: resp,
+            })?,
+        )
     }
 
     pub async fn get_chunk(
